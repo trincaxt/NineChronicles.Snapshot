@@ -5,7 +5,9 @@ using System.Formats.Tar;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net.Http;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Bencodex.Types;
 using Cocona;
@@ -44,6 +46,9 @@ namespace NineChronicles.Snapshot
         private RocksDBStore _store;
         private TrieStateStore _stateStore;
         private ILogger _logger;
+        private HttpClient _httpClient;
+        private string _slackWebhookUrl;
+        private double _copyStatesTime;
 
         private ArchiveType _archiveType = ArchiveType.Zip;
         private string ArchiveExtension { get => _archiveExtensions[_archiveType]; }
@@ -64,7 +69,9 @@ namespace NineChronicles.Snapshot
             int compressionLevel = 0,
             string storePath = null,
             int blockBefore = 1,
-            SnapshotType snapshotType = SnapshotType.Partition)
+            SnapshotType snapshotType = SnapshotType.Partition,
+            [Option("slack-webhook-url")]
+            string slackWebhookUrl = null)
         {
             try
             {
@@ -74,6 +81,10 @@ namespace NineChronicles.Snapshot
                 var loggerConf = new LoggerConfiguration()
                     .ReadFrom.Configuration(configuration);
                 _logger = loggerConf.CreateLogger();
+
+                // Initialize Slack webhook and HttpClient
+                _slackWebhookUrl = slackWebhookUrl;
+                _httpClient = new HttpClient();
 
                 if (zstd)
                 {
@@ -291,7 +302,9 @@ namespace NineChronicles.Snapshot
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} CopyStates Start.");
                     start = DateTimeOffset.Now;
                     _stateStore.CopyStates(stateHashes, newStateStore);
-                    _logger.Debug($"Snapshot-{snapshotType.ToString()} CopyStates Done. Time Taken: {(DateTimeOffset.Now - start).TotalMinutes} min.");
+
+                    _copyStatesTime = (DateTimeOffset.Now - start).TotalMinutes;
+                    _logger.Debug($"Snapshot-{snapshotType.ToString()} CopyStates Done. Time Taken: {_copyStatesTime} min.");
 
                     newStateStore.Dispose();
                     newStateKeyValueStore.Dispose();
@@ -306,8 +319,15 @@ namespace NineChronicles.Snapshot
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} Determining State Sizes Start.");
                     var statesPathSize = Directory.GetFiles(statesPath, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length);
                     var newStatesPathSize = Directory.GetFiles(newStatesPath, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length);
-                    _logger.Debug($"Snapshot-{snapshotType.ToString()} Previous States Size: {(float)statesPathSize / 1024 / 1024 / 1024} GiB");
-                    _logger.Debug($"Snapshot-{snapshotType.ToString()} New States Size: {(float)newStatesPathSize / 1024 / 1024 / 1024} GiB");
+                    var previousStatesSizeGiB = (float)statesPathSize / 1024 / 1024 / 1024;
+                    var newStatesSizeGiB = (float)newStatesPathSize / 1024 / 1024 / 1024;
+
+                    _logger.Debug($"Snapshot-{snapshotType.ToString()} Previous States Size: {previousStatesSizeGiB} GiB");
+                    _logger.Debug($"Snapshot-{snapshotType.ToString()} New States Size: {newStatesSizeGiB} GiB");
+
+                    // Send Slack message with CopyStates time and size info
+                    var slackMessage = $"📊 CopyStates Complete\n⏱️ Time: {_copyStatesTime} min\n💾 Size: {newStatesSizeGiB} GiB";
+                    SendSlackMessage(slackMessage);
 
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} Move States Start.");
                     start = DateTimeOffset.Now;
@@ -404,6 +424,10 @@ namespace NineChronicles.Snapshot
             {
                 _logger.Error(ex.Message);
                 _logger.Error(ex.StackTrace);
+            }
+            finally
+            {
+                _httpClient?.Dispose();
             }
         }
 
@@ -722,6 +746,31 @@ namespace NineChronicles.Snapshot
             }
 
             return _store.GetBlock(nextHash).LastCommit;
+        }
+
+        private void SendSlackMessage(string message)
+        {
+            if (string.IsNullOrEmpty(_slackWebhookUrl))
+            {
+                return;
+            }
+
+            try
+            {
+                var payload = new
+                {
+                    text = message
+                };
+
+                var json = JsonConvert.SerializeObject(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                _httpClient.PostAsync(_slackWebhookUrl, content).Wait();
+            }
+            catch (Exception ex)
+            {
+                _logger?.Warning("Failed to send Slack message: {Error}", ex.Message);
+            }
         }
 
         public class NCActionLoader : IActionLoader
