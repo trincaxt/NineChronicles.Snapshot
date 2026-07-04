@@ -11,7 +11,7 @@
     <!-- Pacotes principais -->
     <PackageReference Include="Cocona.Lite" Version="2.0.3" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.5" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.9" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
     <PackageReference Include="Serilog.Formatting.Compact" Version="1.1.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="3.4.0" />
