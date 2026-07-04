@@ -9,7 +9,7 @@
 
   <ItemGroup>
     <!-- Pacotes principais -->
-    <PackageReference Include="Cocona.Lite" Version="2.0.3" />
+    <PackageReference Include="Cocona.Lite" Version="2.2.0" />
     <PackageReference Include="ZstdSharp.Port" Version="0.8.5" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
