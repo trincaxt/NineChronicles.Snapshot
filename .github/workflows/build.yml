@@ -12,7 +12,6 @@ env:
 
 jobs:
   build_and_push:
-    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
 
     steps:
@@ -33,14 +32,23 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      - name: Build and push multi-arch image
+      - name: Build and push commit tag
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.DOCKER_REPO }}:git-${{ github.sha }}
-            ${{ env.DOCKER_REPO }}:latest
+          tags: ${{ env.DOCKER_REPO }}:git-${{ github.sha }}
+          build-args: |
+            COMMIT=git-${{ github.sha }}
+
+      - name: Build and push latest
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.DOCKER_REPO }}:latest
           build-args: |
             COMMIT=git-${{ github.sha }}
