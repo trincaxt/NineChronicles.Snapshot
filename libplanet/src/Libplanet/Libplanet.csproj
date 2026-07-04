@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Summary>A .NET library for creating multiplayer online game in decentralized fashion.</Summary>
+    <Description>A .NET library for creating multiplayer online game in decentralized fashion.
+See also the docs for details:
+https://docs.libplanet.io/</Description>
+    <!-- FIXME: The above summary/description should be rewritten. -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <ProduceReferenceAssembly>true</ProduceReferenceAssembly>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);S4035;CS1591;NU5104;MEN001;NU1902</NoWarn>
+    <!-- FIXME: S4035 and CS1591 should be turned on eventually. -->
+    <!-- FIXME: NU1902 should be removed once BouncyCastle is bumped to a secure version -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Collections.Immutable" Version="1.*" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.0" />
+    <PackageReference Include="System.Text.Json" Version="6.0.*" />
+    <PackageReference Include="Bencodex" Version="0.16.0" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+    <PackageReference Include="Serilog" Version="2.8.0" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" Version="1.1.1" />
+    <PackageReference Include="Norgerman.Cryptography.Scrypt" Version="2.0.1" />
+    <PackageReference Include="Nito.AsyncEx" Version="5.0.0" />
+    <PackageReference Include="System.Linq.Async" Version="4.0.*" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' or
+                         '$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Threading.Channels" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Libplanet.Common\Libplanet.Common.csproj" />
+    <ProjectReference Include="..\Libplanet.Crypto\Libplanet.Crypto.csproj" />
+    <ProjectReference Include="..\Libplanet.Types\Libplanet.Types.csproj" />
+    <ProjectReference Include="..\Libplanet.Store\Libplanet.Store.csproj" />
+    <ProjectReference Include="..\Libplanet.Action\Libplanet.Action.csproj" />
+  </ItemGroup>
+
+</Project>

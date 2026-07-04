@@ -1,0 +1,39 @@
+FROM mcr.microsoft.com/dotnet/sdk:6.0 AS build-env
+WORKDIR /app
+
+# Copy csproj and restore as distinct layers
+# Note that it's ordered by the least frequently changed
+COPY ./Directory.Build.props ./
+COPY ./src/Directory.Build.props ./src/
+COPY ./tools/Directory.Build.props ./tools/
+COPY ./src/Libplanet.Stun/Libplanet.Stun.csproj ./src/Libplanet.Stun/
+RUN dotnet restore src/Libplanet.Stun
+COPY ./src/Libplanet.RocksDBStore/Libplanet.RocksDBStore.csproj ./src/Libplanet.RocksDBStore/
+RUN dotnet restore src/Libplanet.RocksDBStore
+COPY ./tools/Libplanet.Explorer.Executable/Libplanet.Explorer.Executable.csproj ./tools/Libplanet.Explorer.Executable/
+RUN dotnet restore tools/Libplanet.Explorer.Executable
+COPY ./tools/Libplanet.Explorer/Libplanet.Explorer.csproj ./tools/Libplanet.Explorer/
+RUN dotnet restore tools/Libplanet.Explorer
+COPY ./src/Libplanet/Libplanet.csproj ./src/Libplanet/
+RUN dotnet restore src/Libplanet
+
+# Copy everything else and build
+COPY . ./
+RUN dotnet publish -c Release -r linux-x64 -o out tools/Libplanet.Explorer.Executable
+
+# Build runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:6.0
+WORKDIR /app
+COPY --from=build-env /app/out .
+
+# Install native deps & utilities for production
+RUN apt-get update \
+    && apt-get install -y --allow-unauthenticated \
+        libc6-dev jq \
+     && rm -rf /var/lib/apt/lists/*
+
+# Runtime settings
+EXPOSE 5000
+VOLUME /data
+
+ENTRYPOINT ["Libplanet.Explorer.Executable"]

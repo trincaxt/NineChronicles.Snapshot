@@ -1,0 +1,125 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [
+            "src/Libplanet/Libplanet.csproj",
+            "src/Libplanet.Action/Libplanet.Action.csproj",
+            "src/Libplanet.Common/Libplanet.Common.csproj",
+            "src/Libplanet.Crypto/Libplanet.Crypto.csproj",
+            "src/Libplanet.Crypto.Secp256k1/Libplanet.Crypto.Secp256k1.csproj",
+            "tools/Libplanet.Explorer.Cocona/Libplanet.Explorer.Cocona.csproj",
+            "tools/Libplanet.Extensions.Cocona/Libplanet.Extensions.Cocona.csproj",
+            "test/Libplanet.Mocks/Libplanet.Mocks.csproj",
+            "src/Libplanet.Net/Libplanet.Net.csproj",
+            "src/Libplanet.RocksDBStore/Libplanet.RocksDBStore.csproj",
+            "src/Libplanet.Store/Libplanet.Store.csproj",
+            "src/Libplanet.Store.Remote/Libplanet.Store.Remote.csproj",
+            "src/Libplanet.Stun/Libplanet.Stun.csproj",
+            "src/Libplanet.Types/Libplanet.Types.csproj"
+          ],
+          "exclude": ["**/bin/**", "**/obj/**"],
+          "src": "../"
+        }
+      ],
+      "dest": "api",
+      "disableGitFeatures": false,
+      "disableDefaultFilter": false,
+      "properties": {
+        "TargetFramework": "netstandard2.1"
+      }
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [
+          "api/**.yml",
+          "api/index.md"
+        ]
+      },
+      {
+        "files": [
+          "articles/**.md",
+          "articles/**/toc.yml",
+          "toc.yml",
+          "*.md"
+        ]
+      },
+      {
+        "src": "../tools/Libplanet.Analyzers",
+        "dest": "analyzer",
+        "files": [
+          "*.md",
+          "rules/*.md"
+        ]
+      },
+      {
+        "src": "../tools/Libplanet.Tools",
+        "dest": "cli",
+        "files": [
+          "*.md"
+        ]
+      },
+      {
+        "src": "../tools/Libplanet.Explorer",
+        "dest": "explorer",
+        "files": [
+          "*.md"
+        ]
+      },
+      {
+        "src": "../",
+        "files": [
+          "CHANGES.md",
+          "CONTRIBUTING.md",
+          "RELEASE.md",
+          "changes/**.md"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "images/**"
+        ]
+      }
+    ],
+    "overwrite": [
+      {
+        "files": [
+          "apidoc/**.md"
+        ],
+        "exclude": [
+          "obj/**",
+          "_site/**"
+        ]
+      }
+    ],
+    "xrefService": [
+      "https://xref.docs.microsoft.com/query?uid={uid}"
+    ],
+    "dest": "_site",
+    "globalMetadata": {
+      "_appTitle": "Libplanet",
+      "_appLogoPath": "images/logo.svg",
+      "_appFaviconPath": "images/favicon.ico",
+      "_appFooter": "Copyright © 2018\u20132023 <a href=\"https://planetariumhq.com/\">Planetarium</a>"
+    },
+    "globalMetadataFiles": [],
+    "fileMetadataFiles": [],
+
+    "template": ["default"],
+
+    "theme": ["theme"],
+    "postProcessors": [],
+    "markdownEngineName": "markdig",
+    "noLangKeyword": false,
+    "keepFileLink": false,
+    "cleanupCacheHistory": false,
+    "disableGitFeatures": false,
+    "repositoryRoot": "../",
+    "logLevel": "Verbose"
+  }
+}

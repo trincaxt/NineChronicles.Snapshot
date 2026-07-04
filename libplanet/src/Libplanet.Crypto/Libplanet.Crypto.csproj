@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="System.Collections.Immutable" Version="1.*" />
+    <PackageReference Include="System.Text.Json" Version="6.0.*" />
+    <PackageReference Include="Bencodex" Version="0.16.0" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.4.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(SkipSonar)' != 'true'">
+    <PackageReference Remove="SonarAnalyzer.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Libplanet.Common\Libplanet.Common.csproj" />
+  </ItemGroup>
+
+</Project>

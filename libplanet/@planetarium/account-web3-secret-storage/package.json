@@ -1,0 +1,74 @@
+{
+  "name": "@planetarium/account-web3-secret-storage",
+  "private": true,
+  "description": "Libplanet account implementation using Ethereum Web3 Secret Storage",
+  "type": "module",
+  "main": "./dist/index.js",
+  "imports": {
+    "#crypto": {
+      "node": "./src/crypto/node.ts",
+      "default": "./src/crypto/browser.ts"
+    },
+    "#path": {
+      "node": "./src/path/node.ts",
+      "default": "./src/path/browser.ts"
+    },
+    "#fs": {
+      "node": "./src/fs/node.ts",
+      "default": "./src/fs/browser.ts"
+    }
+  },
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/index.d.ts",
+        "require": "./dist/index.cjs",
+        "import": "./dist/index.mjs"
+      },
+      "browser": "./dist/index.browser.mjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "yarn && nanobundle build",
+    "prepack": "yarn && yarn build",
+    "dev": "yarn && vitest",
+    "test": "yarn && yarn run -T tsc -p tsconfig.json && vitest run",
+    "coverage": "yarn && vitest run --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/planetarium/libplanet.git",
+    "directory": "@planetarium/account-web3-secret-storage"
+  },
+  "keywords": [
+    "libplanet"
+  ],
+  "author": "Planetarium (https://planetarium.dev/)",
+  "license": "LGPL-2.1-or-later",
+  "devDependencies": {
+    "@planetarium/account": "workspace:^",
+    "@types/node": "^18.13.0",
+    "@types/stream-buffers": "^3",
+    "@vitest/coverage-c8": "^0.29.2",
+    "@vitest/ui": "^0.29.2",
+    "fast-check": "^3.8.0",
+    "nanobundle": "^1.6.0",
+    "stream-buffers": "^3.0.2",
+    "vite": "^4.1.4",
+    "vitest": "^0.29.2"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.3.1",
+    "@peculiar/webcrypto": "^1.4.3"
+  },
+  "peerDependencies": {
+    "@planetarium/account": "workspace:^"
+  },
+  "engines": {
+    "node": "20.2.0"
+  }
+}

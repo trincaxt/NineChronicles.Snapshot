@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+# This workflow checks if the build (compilation) succeeds without any errors.
+# Although the build is done in CircleCI as well, to speed up the build time
+# some checks are turned off in CircleCI.  To conduct the complete checks
+# there should be this separated workflow.
+# See also the below issues:
+# - https://github.com/planetarium/libplanet/pull/979
+# - https://github.com/planetarium/libplanet/pull/977
+# - https://github.com/planetarium/libplanet/issues/976
+on:
+  push: null
+  pull_request: null
+name: check-build
+
+jobs:
+  build:
+    name: check-build
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@main
+      if: github.event_name != 'pull_request'
+    - uses: actions/checkout@main
+      if: github.event_name == 'pull_request'
+      with:
+        ref: ${{ github.pull_request.head.sha }}
+    - uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 6.0.x
+    - run: 'hooks/pre-commit'
+    - run: 'dotnet pack -p:SkipSonar=false -p:_IsPacking=true'

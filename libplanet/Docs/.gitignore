@@ -1,0 +1,11 @@
+*.nuget
+_site/
+api/*.yml
+api/.manifest
+docfx/
+docfx.zip
+/**/bin/
+/**/DROP/
+/**/packages/
+/**/obj/
+/**/TEMP/

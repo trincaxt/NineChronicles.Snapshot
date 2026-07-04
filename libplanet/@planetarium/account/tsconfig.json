@@ -1,0 +1,15 @@
+{
+  "include": ["./src", "*.d.ts", "*.ts"],
+  "compilerOptions": {
+    "outDir": "dist",
+    "target": "ES2022",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+}
