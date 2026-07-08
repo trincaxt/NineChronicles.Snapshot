@@ -18,8 +18,8 @@ COPY . ./
 RUN dotnet publish NineChronicles.Snapshot/NineChronicles.Snapshot.csproj \
     -c Release \
     -r linux-x64 \
-    -o out
-
+    -o out \
+    --self-contained true
 
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim
