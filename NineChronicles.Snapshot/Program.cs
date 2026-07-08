@@ -493,7 +493,7 @@ namespace NineChronicles.Snapshot
                             options: CreateBulkWriteOptions());
                         var newStateStore = new TrieStateStore(newStateKeyValueStore);
 
-                        reopenedStateStore.CopyStates(stateHashes, newStateStore, _parallelism);
+                        reopenedStateStore.CopyStates(stateHashes, newStateStore);
                         _copyStatesTime = (DateTimeOffset.Now - start).TotalMinutes;
                         
                         newStateStore.Dispose();
