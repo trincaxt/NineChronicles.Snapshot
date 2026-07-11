@@ -1,13 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using System.Threading;
-using System.Threading.Channels;
-using System.Threading.Tasks;
 using Libplanet.Common;
 using Serilog;
 
@@ -40,8 +35,8 @@ namespace NineChronicles.Snapshot.GcPipeline
 
         public override bool Equals(object obj) => obj is Hash32 h && Equals(h);
 
-        // Usa só A e B (16 bytes) para o hash — suficiente para distribuição uniforme
-        // SHA256 tem entropia uniforme em todos os bytes
+        // Usa só A e B (16 bytes) para o hash — suficiente para distribuição uniforme.
+        // SHA256 tem entropia uniforme em todos os bytes.
         public override int GetHashCode() => HashCode.Combine(A, B);
 
         public byte[] ToBytes()
@@ -56,22 +51,27 @@ namespace NineChronicles.Snapshot.GcPipeline
     }
 
     /// <summary>
-    /// GcBfsFilter otimizado — mesma lógica, 2-3x mais rápido.
+    /// GcBfsFilter — BFS por fixpoint (multi-passe, low-RAM).
     ///
-    /// Otimizações aplicadas:
-    ///   1. Hash32 struct  — elimina ByteUtil.Hex() + string allocation por entry
-    ///   2. FileOptions.SequentialScan — hint ao OS para prefetch agressivo
-    ///   3. Buffer 32 MB   — menos syscalls de I/O
-    ///   4. Producer-Consumer — I/O e CPU em paralelo (1 leitor + N processadores)
-    ///   5. Channel bounds — controla memory pressure
+    /// Estratégia (inspirada na versão Rust):
+    ///   1. Working-set único mutável (pending). Filhos entram no MESMO passe.
+    ///   2. Scan sequencial completo do arquivo; filhos à frente do pai são pegos de graça.
+    ///   3. Repete passes até um passe não achar nada novo (fixpoint).
+    ///
+    /// RAM: só visited + pending (HashSet de Hash32), sem índices key→offset.
+    /// I/O: 100% sequencial (NVMe feliz), zero random-access.
+    ///
+    /// Otimizações:
+    ///   - Hash32 struct         — sem alocação de string por entry
+    ///   - FileOptions.SequentialScan — hint ao OS para prefetch agressivo
+    ///   - Buffer de 126 MB      — menos syscalls de I/O
+    ///   - Sem paralelismo       — I/O sequencial single-thread é ideal para NVMe
     /// </summary>
     public class GcBfsFilter
     {
         private readonly ILogger _logger;
         private const int HASH_LENGTH    = 32;
         private const int FILE_BUFFER    = 126 * 1024 * 1024; // 126 MB
-        private const int CHANNEL_CAP    = 8192;               // entries em buffer entre leitor e workers
-        private const int WORKER_COUNT   = 7;                 // workers de processamento (CPU)
 
         // Padrão Bencodex para hash: b"32:" + 32 bytes
         private static readonly byte B3 = (byte)'3';
@@ -88,227 +88,138 @@ namespace NineChronicles.Snapshot.GcPipeline
             IEnumerable<HashDigest<SHA256>> roots,
             string outputFilePath)
         {
-            _logger.Information("🌳 Starting OPTIMIZED BFS (Hash32 struct + producer-consumer)...");
-            _logger.Information("   I/O buffer: {Buf} MB | Workers: {W}", FILE_BUFFER / 1024 / 1024, WORKER_COUNT);
+            _logger.Information("🌳 BFS fixpoint (multi-passe, HashSet, low-RAM)...");
 
-            // Converte roots para Hash32
-            var visited  = new ConcurrentDictionary<Hash32, byte>();
-            var currentLevel = new HashSet<Hash32>();
+            var fileInfo = new FileInfo(exportFilePath);
+            _logger.Information("   File size: {Size:F2} GB",
+                fileInfo.Length / 1024.0 / 1024.0 / 1024.0);
+
+            // visited = já processado (filhos extraídos).
+            // pending = descoberto, ainda não localizado no arquivo.
+            var visited = new HashSet<Hash32>();
+            var pending = new HashSet<Hash32>();
+
             foreach (var r in roots)
-                currentLevel.Add(new Hash32(r.ToByteArray()));
+                pending.Add(new Hash32(r.ToByteArray()));
 
-            int level = 0;
+            int pass = 0;
 
-            while (currentLevel.Count > 0)
+            while (pending.Count > 0)
             {
-                _logger.Information("📂 Level {L}: {N:N0} nodes to process", level, currentLevel.Count);
-                var t0 = DateTime.Now;
+                var start = DateTime.Now;
+                int pendingAtStart = pending.Count;
+                int foundThisPass = 0;
 
-                var nextLevel = new ConcurrentBag<Hash32>();
-                int foundInLevel = 0;
-
-                if (currentLevel.Count <= 10)
-                {
-                    // Levels pequenos: scan sequencial simples (overhead do producer-consumer não vale)
-                    foundInLevel = ScanSequential(exportFilePath, currentLevel, visited, nextLevel);
-                }
-                else
-                {
-                    // Levels grandes: producer-consumer (I/O e CPU em paralelo)
-                    foundInLevel = ScanProducerConsumer(exportFilePath, currentLevel, visited, nextLevel);
-                }
-
-                var elapsed = (DateTime.Now - t0).TotalSeconds;
-
-                _logger.Information("   ✓ Level {L}: Found {F:N0}/{T:N0} nodes, {C:N0} children → level {N}",
-                    level, foundInLevel, currentLevel.Count, nextLevel.Count, level + 1);
-                _logger.Information("   Scan time: {T:F1}s ({V:N0} total visited)",
-                    elapsed, visited.Count);
-
-                if (foundInLevel == 0 && currentLevel.Count > 0)
-                {
-                    _logger.Warning("   ⚠  Level {L}: {N} nodes not found (orphaned references)", level, currentLevel.Count);
-                    break;
-                }
-
-                currentLevel = new HashSet<Hash32>(nextLevel);
-                level++;
-
-                if (level > 100)
-                {
-                    _logger.Warning("BFS stopped at level 100 (safety limit)");
-                    break;
-                }
-            }
-
-            _logger.Information("✅ BFS complete: {L} levels, {N:N0} live nodes", level, visited.Count);
-
-            // Escreve keys vivas (bytes binários, sem conversão hex)
-            _logger.Information("📤 Writing {N:N0} live keys to {F}...", visited.Count, Path.GetFileName(outputFilePath));
-
-            using var fs = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write,
-                FileShare.None, FILE_BUFFER, FileOptions.WriteThrough);
-            using var writer = new BinaryWriter(fs);
-            foreach (var kv in visited.Keys)
-                writer.Write(kv.ToBytes());
-
-            _logger.Information("✅ GC filter complete: {N:N0} keys written", visited.Count);
-
-            return new BfsResult
-            {
-                LiveNodes    = visited.Count,
-                TotalLevels  = level,
-                TotalScanned = visited.Count,
-            };
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // Scan sequencial — usado para levels pequenos (< 10 nodes)
-        // ─────────────────────────────────────────────────────────────────
-        private int ScanSequential(
-            string filePath,
-            HashSet<Hash32> currentLevel,
-            ConcurrentDictionary<Hash32, byte> visited,
-            ConcurrentBag<Hash32> nextLevel)
-        {
-            int found = 0;
-            var keyBuf = new byte[HASH_LENGTH];
-
-            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-                FileShare.Read, FILE_BUFFER, FileOptions.SequentialScan);
-            using var reader = new BinaryReader(fs);
-
-            long scanned = 0;
-
-            while (fs.Position < fs.Length)
-            {
-                if (reader.Read(keyBuf, 0, HASH_LENGTH) != HASH_LENGTH) break;
-                var valLen = reader.ReadInt32();
-                if (valLen < 0 || valLen > 100_000_000) break;
-
-                scanned++;
-
-                var key = new Hash32(keyBuf);
-
-                if (currentLevel.Contains(key))
-                {
-                    var value = reader.ReadBytes(valLen);
-                    if (visited.TryAdd(key, 0))
-                    {
-                        found++;
-                        ExtractAndEnqueue(value, visited, nextLevel);
-                    }
-                }
-                else
-                {
-                    fs.Seek(valLen, SeekOrigin.Current);
-                }
-
-                if (scanned % 10_000_000 == 0)
-                    _logger.Debug("   Scanned {N}M entries...", scanned / 1_000_000);
-            }
-
-            return found;
-        }
-
-        // ─────────────────────────────────────────────────────────────────
-        // Producer-Consumer — usado para levels grandes
-        //
-        // 1 thread lê o arquivo sequencialmente (I/O bound)
-        // N threads processam entries lidas (CPU bound: HashSet lookup)
-        //
-        // Quando o scan é I/O bound: CPU fica ociosa enquanto aguarda disco.
-        // Com producer-consumer: CPU processa o batch anterior enquanto
-        // o próximo batch já está sendo lido. Throughput maior.
-        // ─────────────────────────────────────────────────────────────────
-        private int ScanProducerConsumer(
-            string filePath,
-            HashSet<Hash32> currentLevel,
-            ConcurrentDictionary<Hash32, byte> visited,
-            ConcurrentBag<Hash32> nextLevel)
-        {
-            // Channel: (key, value) pairs para os workers
-            var channel = Channel.CreateBounded<(Hash32 key, byte[] value)>(
-                new BoundedChannelOptions(CHANNEL_CAP)
-                {
-                    FullMode   = BoundedChannelFullMode.Wait,
-                    SingleWriter = true,
-                    SingleReader = false,
-                });
-
-            int foundTotal = 0;
-            long scanned   = 0;
-
-            // Workers: processam entries do channel
-            var workers = new Task[WORKER_COUNT];
-            for (int i = 0; i < WORKER_COUNT; i++)
-            {
-                workers[i] = Task.Run(async () =>
-                {
-                    int localFound = 0;
-                    await foreach (var (key, value) in channel.Reader.ReadAllAsync())
-                    {
-                        if (visited.TryAdd(key, 0))
-                        {
-                            localFound++;
-                            ExtractAndEnqueue(value, visited, nextLevel);
-                        }
-                    }
-                    Interlocked.Add(ref foundTotal, localFound);
-                });
-            }
-
-            // Producer: lê arquivo sequencialmente e envia para workers
-            // Só envia entries que estão em currentLevel (evita overhead nos workers)
-            var producer = Task.Run(async () =>
-            {
-                var keyBuf = new byte[HASH_LENGTH];
-                using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-                    FileShare.Read, FILE_BUFFER, FileOptions.SequentialScan);
+                using var fs = new FileStream(
+                    exportFilePath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    FILE_BUFFER,
+                    FileOptions.SequentialScan);
                 using var reader = new BinaryReader(fs);
+
+                var keyBuf = new byte[HASH_LENGTH];
+                long scanned = 0;
 
                 while (fs.Position < fs.Length)
                 {
-                    if (reader.Read(keyBuf, 0, HASH_LENGTH) != HASH_LENGTH) break;
+                    if (reader.Read(keyBuf, 0, HASH_LENGTH) != HASH_LENGTH)
+                        break;
+
                     var valLen = reader.ReadInt32();
-                    if (valLen < 0 || valLen > 100_000_000) break;
+                    if (valLen < 0 || valLen > 100_000_000)
+                        break;
 
-                    Interlocked.Increment(ref scanned);
+                    scanned++;
 
+                    // Se está pendente, processa AGORA. Filhos entram no pending
+                    // e, se estiverem à frente neste arquivo, são pegos neste
+                    // mesmo passe.
                     var key = new Hash32(keyBuf);
-
-                    if (currentLevel.Contains(key) && !visited.ContainsKey(key))
+                    if (pending.Remove(key))
                     {
+                        visited.Add(key);
+                        foundThisPass++;
+
                         var value = reader.ReadBytes(valLen);
-                        await channel.Writer.WriteAsync((key, value));
+                        ExtractChildren(value, visited, pending);
                     }
                     else
                     {
                         fs.Seek(valLen, SeekOrigin.Current);
                     }
 
-                    if (Volatile.Read(ref scanned) % 10_000_000 == 0)
-                        _logger.Debug("   Scanned {N}M entries...", Volatile.Read(ref scanned) / 1_000_000);
+                    if (scanned % 20_000_000 == 0)
+                    {
+                        _logger.Debug("   ...scanned {N}M | pending {P} | visited {V}",
+                            scanned / 1_000_000, pending.Count, visited.Count);
+                    }
                 }
 
-                channel.Writer.Complete();
-            });
+                pass++;
+                _logger.Information(
+                    "✓ Pass {P}: found {F:N0} (pending era {T:N0}) | " +
+                    "resta {R:N0} pending | {Elapsed:F1}s | {V:N0} visited",
+                    pass, foundThisPass, pendingAtStart, pending.Count,
+                    (DateTime.Now - start).TotalSeconds, visited.Count);
 
-            producer.Wait();
-            Task.WaitAll(workers);
+                // Fixpoint: se nada foi achado, o que sobrou em pending
+                // não existe no arquivo (dangling references).
+                if (foundThisPass == 0)
+                {
+                    if (pending.Count > 0)
+                    {
+                        _logger.Warning(
+                            "   ℹ️ {N} pending não existem no export (dangling refs), ignorando.",
+                            pending.Count);
+                    }
+                    break;
+                }
+            }
 
-            return foundTotal;
+            _logger.Information(
+                "✅ BFS fixpoint: {P} passes, {V:N0} live nodes", pass, visited.Count);
+
+            // Escreve keys vivas (bytes binários, sem conversão hex)
+            _logger.Information(
+                "📤 Writing {N:N0} live keys to {F}...",
+                visited.Count, Path.GetFileName(outputFilePath));
+
+            using var fsOut = new FileStream(
+                outputFilePath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                FILE_BUFFER,
+                FileOptions.WriteThrough);
+            using var writer = new BinaryWriter(fsOut);
+
+            foreach (var key in visited)
+                writer.Write(key.ToBytes());
+
+            writer.Flush();
+            _logger.Information(
+                "✅ GC filter complete: {N:N0} keys written", visited.Count);
+
+            return new BfsResult
+            {
+                LiveNodes    = visited.Count,
+                TotalLevels  = pass,
+                TotalScanned = visited.Count,
+            };
         }
 
         // ─────────────────────────────────────────────────────────────────
         // Extrai child hashes do value usando padrão b"32:" + 32 bytes.
         // Versão otimizada: compara bytes individuais sem alocação.
+        // Adiciona filhos não visitados diretamente ao pending set.
         // ─────────────────────────────────────────────────────────────────
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void ExtractAndEnqueue(
+        private void ExtractChildren(
             byte[] data,
-            ConcurrentDictionary<Hash32, byte> visited,
-            ConcurrentBag<Hash32> nextLevel)
+            HashSet<Hash32> visited,
+            HashSet<Hash32> pending)
         {
             const int STEP = 3 + HASH_LENGTH; // "32:" + 32 bytes = 35
             if (data.Length < STEP) return;
@@ -319,8 +230,8 @@ namespace NineChronicles.Snapshot.GcPipeline
                 if (data[i] == B3 && data[i + 1] == B2 && data[i + 2] == BC)
                 {
                     var child = new Hash32(data, i + 3);
-                    if (!visited.ContainsKey(child))
-                        nextLevel.Add(child);
+                    if (!visited.Contains(child))
+                        pending.Add(child);
                     i += STEP;
                 }
                 else

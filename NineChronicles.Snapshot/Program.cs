@@ -180,7 +180,9 @@ namespace NineChronicles.Snapshot
             int blockBefore = 1,
             SnapshotType snapshotType = SnapshotType.Partition,
             [Option("slack-webhook-url")]
-            string slackWebhookUrl = null)
+            string slackWebhookUrl = null,
+            [Option("epoch-limit")]
+            int epochLimit = 0)
         {
             try
             {
@@ -296,8 +298,13 @@ namespace NineChronicles.Snapshot
                     var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                     _liveCheckpointPath = Path.Combine(homeDir, $"9c-live-checkpoint-{Guid.NewGuid():N}");
 
+                    if (epochLimit > 0)
+                    {
+                        _logger.Information("   Epoch≥: {Limit}", epochLimit);
+                    }
+
                     _logger.Information("Creating checkpoint: {Checkpoint}", _liveCheckpointPath);
-                    CreateLiveCheckpoint(originalStorePath, _liveCheckpointPath);
+                    CreateLiveCheckpoint(originalStorePath, _liveCheckpointPath, epochLimit);
                     storePath = _liveCheckpointPath;
 
                     _logger.Information("Snapshot will run from checkpoint instead of live database");
@@ -570,11 +577,11 @@ namespace NineChronicles.Snapshot
 
                 if (snapshotType == SnapshotType.Partition || snapshotType == SnapshotType.All)
                 {
-                    var epochLimit = GetEpochLimit(latestEpoch, currentMetadataBlockEpoch, previousMetadataBlockEpoch);
+                    var archiveEpochLimit = GetEpochLimit(latestEpoch, currentMetadataBlockEpoch, previousMetadataBlockEpoch);
 
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} Create Partition Archive Start.");
                     start = DateTimeOffset.Now;
-                    ArchiveDirectory(partitionSnapshotPath, storePath, epochLimit, new[] { "block", "tx" }, new[] { "blockindex", "txindex" });
+                    ArchiveDirectory(partitionSnapshotPath, storePath, archiveEpochLimit, new[] { "block", "tx" }, new[] { "blockindex", "txindex" });
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} Create Partition Archive Done. Time Taken: {(DateTimeOffset.Now - start).TotalMinutes} min.");
 
                     _logger.Debug($"Snapshot-{snapshotType.ToString()} Create State Archive Start.");
@@ -988,7 +995,7 @@ namespace NineChronicles.Snapshot
             return _store.GetBlock(nextHash).LastCommit;
         }
 
-        private void CreateLiveCheckpoint(string sourceDir, string checkpointDir)
+        private void CreateLiveCheckpoint(string sourceDir, string checkpointDir, int epochLimit = 0)
         {
             if (Directory.Exists(checkpointDir))
             {
@@ -1037,14 +1044,27 @@ namespace NineChronicles.Snapshot
 
                 var epochDirs = Directory.GetDirectories(rootSrc, "epoch*")
                     .OrderBy(d => d)
+                    .Where(d => {
+                        if (epochLimit <= 0) return true;
+                        var match = Regex.Match(Path.GetFileName(d), @"^epoch(\d+)$");
+                        return match.Success && int.Parse(match.Groups[1].Value) >= epochLimit;
+                    })
                     .ToArray();
 
                 if (epochDirs.Length == 0)
                 {
+                    _logger.Information("   Nenhuma época >= {Limit} encontrada em {Root}, pulando.", epochLimit, epochRoot);
                     continue;
                 }
 
-                _logger.Information("📦 Processando {Count} épocas de {Root} (validação completa)...", epochDirs.Length, epochRoot);
+                if (epochLimit > 0)
+                {
+                    _logger.Information("📦 Processando {Count} épocas de {Root} (>= {EpochLimit})...", epochDirs.Length, epochRoot, epochLimit);
+                }
+                else
+                {
+                    _logger.Information("📦 Processando {Count} épocas de {Root} (validação completa)...", epochDirs.Length, epochRoot);
+                }
 
                 int processed = 0;
                 foreach (var epochDir in epochDirs)
